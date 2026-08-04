@@ -1,5 +1,10 @@
 package com.rtf.scoreboard;
 
+import com.rtf.scoreboard.exception.InvalidScoreException;
+import com.rtf.scoreboard.exception.InvalidTeamNameException;
+import com.rtf.scoreboard.exception.MatchNotInProgressException;
+import com.rtf.scoreboard.exception.SameTeamMatchException;
+import com.rtf.scoreboard.exception.TeamAlreadyPlayingException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -12,9 +17,9 @@ import java.util.Objects;
 
 public final class MatchManager {
     private final Clock clock;
-    private final Map<String, Match> activeByTeam = new HashMap<>();
-    private final Map<String, String> displayNames = new HashMap<>();
-    private final List<Match> history = new ArrayList<>();
+    private final Map<String, Match> inProgressMatchesByTeamKey = new HashMap<>();
+    private final Map<String, String> canonicalTeamNames = new HashMap<>();
+    private final List<Match> finishedMatches = new ArrayList<>();
     private long nextCreationOrder;
 
     public MatchManager() {
@@ -25,69 +30,58 @@ public final class MatchManager {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
-    private static TeamName parseTeam(String name) {
-        if (name == null) throw new InvalidTeamNameException("Team name must not be null");
-        String trimmed = name.strip();
-        if (trimmed.isEmpty()) throw new InvalidTeamNameException("Team name must not be blank");
-        return new TeamName(trimmed.toLowerCase(Locale.ROOT), trimmed);
-    }
-
     public void createNewMatch(String firstTeam, String secondTeam) {
-        TeamName first = parseTeam(firstTeam);
-        TeamName second = parseTeam(secondTeam);
-        if (first.key.equals(second.key)) {
-            throw new SameTeamMatchException("A team cannot play against itself");
+        TeamName firstTeamName = parseTeamName(firstTeam);
+        TeamName secondTeamName = parseTeamName(secondTeam);
+        if (firstTeamName.key.equals(secondTeamName.key)) {
+            throw new SameTeamMatchException();
         }
-        if (activeByTeam.containsKey(first.key)) {
-            throw new TeamAlreadyPlayingException(first.trimmed + " is already playing");
-        }
-        if (activeByTeam.containsKey(second.key)) {
-            throw new TeamAlreadyPlayingException(second.trimmed + " is already playing");
-        }
+        ensureTeamIsAvailable(firstTeamName);
+        ensureTeamIsAvailable(secondTeamName);
 
-        String firstDisplay = displayNames.getOrDefault(first.key, first.trimmed);
-        String secondDisplay = displayNames.getOrDefault(second.key, second.trimmed);
-        Match match = new Match(first.key, firstDisplay, second.key, secondDisplay,
-                clock.instant(), nextCreationOrder++);
-        displayNames.putIfAbsent(first.key, first.trimmed);
-        displayNames.putIfAbsent(second.key, second.trimmed);
-        activeByTeam.put(first.key, match);
-        activeByTeam.put(second.key, match);
+        Match newMatch = new Match(
+                firstTeamName.key,
+                canonicalNameOf(firstTeamName),
+                secondTeamName.key,
+                canonicalNameOf(secondTeamName),
+                clock.instant(),
+                nextCreationOrder++);
+
+        rememberCanonicalName(firstTeamName);
+        rememberCanonicalName(secondTeamName);
+        inProgressMatchesByTeamKey.put(firstTeamName.key, newMatch);
+        inProgressMatchesByTeamKey.put(secondTeamName.key, newMatch);
     }
 
     public void updateScore(String firstTeam, String secondTeam,
                             int firstTeamScore, int secondTeamScore) {
-        TeamName first = parseTeam(firstTeam);
-        TeamName second = parseTeam(secondTeam);
+        TeamName requestedFirstTeam = parseTeamName(firstTeam);
+        TeamName requestedSecondTeam = parseTeamName(secondTeam);
         if (firstTeamScore < 0 || secondTeamScore < 0) {
-            throw new InvalidScoreException("Scores must be non-negative");
+            throw new InvalidScoreException();
         }
-        Match match = findActivePair(first.key, second.key);
-        if (match.firstKey.equals(first.key)) {
-            match.firstScore = firstTeamScore;
-            match.secondScore = secondTeamScore;
-        } else {
-            match.firstScore = secondTeamScore;
-            match.secondScore = firstTeamScore;
-        }
+        Match match = findInProgressMatch(requestedFirstTeam.key, requestedSecondTeam.key);
+        match.updateScore(requestedFirstTeam.key, firstTeamScore, secondTeamScore);
     }
 
     public void finishMatch(String firstTeam, String secondTeam) {
-        TeamName first = parseTeam(firstTeam);
-        TeamName second = parseTeam(secondTeam);
-        Match match = findActivePair(first.key, second.key);
-        match.status = Status.FINISHED;
-        activeByTeam.remove(match.firstKey);
-        activeByTeam.remove(match.secondKey);
-        history.add(match);
+        TeamName requestedFirstTeam = parseTeamName(firstTeam);
+        TeamName requestedSecondTeam = parseTeamName(secondTeam);
+        Match match = findInProgressMatch(requestedFirstTeam.key, requestedSecondTeam.key);
+
+        match.finish();
+        inProgressMatchesByTeamKey.remove(match.firstTeamKey);
+        inProgressMatchesByTeamKey.remove(match.secondTeamKey);
+        finishedMatches.add(match);
     }
 
     public List<MatchSummary> getSummaryOfInProgressMatches() {
-        return activeByTeam.values().stream()
+        return inProgressMatchesByTeamKey.values().stream()
                 .distinct()
+                .filter(Match::isInProgress)
                 .sorted(Comparator
                         .comparingLong(Match::totalScore).reversed()
-                        .thenComparing((Match match) -> match.startTime, Comparator.reverseOrder())
+                        .thenComparing((Match match) -> match.startedAt, Comparator.reverseOrder())
                         .thenComparing(Comparator.comparingLong(
                                 (Match match) -> match.creationOrder).reversed()))
                 .map(Match::summary)
@@ -95,65 +89,128 @@ public final class MatchManager {
     }
 
     public TeamSummary getSummaryOfTheTeam(String team) {
-        TeamName requested = parseTeam(team);
-        String displayName = displayNames.getOrDefault(requested.key, requested.trimmed);
-        long played = 0;
-        long won = 0;
-        long lost = 0;
-        long drawn = 0;
-        long goals = 0;
-        for (Match match : history) {
-            boolean first = match.firstKey.equals(requested.key);
-            boolean second = match.secondKey.equals(requested.key);
-            if (!first && !second) continue;
-            played++;
-            int own = first ? match.firstScore : match.secondScore;
-            int opponent = first ? match.secondScore : match.firstScore;
-            goals += own;
-            if (own > opponent) won++;
-            else if (own < opponent) lost++;
-            else drawn++;
+        TeamName requestedTeam = parseTeamName(team);
+        String teamName = canonicalNameOf(requestedTeam);
+        long matchesPlayed = 0;
+        long matchesWon = 0;
+        long matchesLost = 0;
+        long matchesDrawn = 0;
+        long goalsScored = 0;
+
+        for (Match match : finishedMatches) {
+            if (!match.includes(requestedTeam.key)) {
+                continue;
+            }
+            matchesPlayed++;
+            int teamScore = match.scoreOf(requestedTeam.key);
+            int opponentScore = match.opponentScoreOf(requestedTeam.key);
+            goalsScored += teamScore;
+            if (teamScore > opponentScore) {
+                matchesWon++;
+            } else if (teamScore < opponentScore) {
+                matchesLost++;
+            } else {
+                matchesDrawn++;
+            }
         }
-        return new TeamSummary(displayName, played, won, lost, drawn, goals);
+        return new TeamSummary(teamName, matchesPlayed, matchesWon, matchesLost,
+                matchesDrawn, goalsScored);
     }
 
-    private Match findActivePair(String firstKey, String secondKey) {
-        Match match = activeByTeam.get(firstKey);
-        if (match == null || !match.containsPair(firstKey, secondKey)) {
-            throw new MatchNotInProgressException("The specified match is not in progress");
+    private void ensureTeamIsAvailable(TeamName teamName) {
+        if (inProgressMatchesByTeamKey.containsKey(teamName.key)) {
+            throw new TeamAlreadyPlayingException(teamName.displayName);
+        }
+    }
+
+    private String canonicalNameOf(TeamName teamName) {
+        return canonicalTeamNames.getOrDefault(teamName.key, teamName.displayName);
+    }
+
+    private void rememberCanonicalName(TeamName teamName) {
+        canonicalTeamNames.putIfAbsent(teamName.key, teamName.displayName);
+    }
+
+    private Match findInProgressMatch(String firstTeamKey, String secondTeamKey) {
+        Match match = inProgressMatchesByTeamKey.get(firstTeamKey);
+        if (match == null || !match.isPair(firstTeamKey, secondTeamKey)) {
+            throw new MatchNotInProgressException();
         }
         return match;
     }
 
+    private static TeamName parseTeamName(String teamName) {
+        if (teamName == null) {
+            throw new InvalidTeamNameException();
+        }
+        String displayName = teamName.strip();
+        if (displayName.isEmpty()) {
+            throw new InvalidTeamNameException();
+        }
+        return new TeamName(displayName.toLowerCase(Locale.ROOT), displayName);
+    }
+
     private enum Status {IN_PROGRESS, FINISHED}
 
-    private record TeamName(String key, String trimmed) {
+    private record TeamName(String key, String displayName) {
     }
 
     private static final class Match {
-        private final String firstKey;
-        private final String firstDisplay;
-        private final String secondKey;
-        private final String secondDisplay;
-        private final Instant startTime;
+        private final String firstTeamKey;
+        private final String firstTeamName;
+        private final String secondTeamKey;
+        private final String secondTeamName;
+        private final Instant startedAt;
         private final long creationOrder;
         private int firstScore;
         private int secondScore;
         private Status status = Status.IN_PROGRESS;
 
-        private Match(String firstKey, String firstDisplay, String secondKey,
-                      String secondDisplay, Instant startTime, long creationOrder) {
-            this.firstKey = firstKey;
-            this.firstDisplay = firstDisplay;
-            this.secondKey = secondKey;
-            this.secondDisplay = secondDisplay;
-            this.startTime = startTime;
+        private Match(String firstTeamKey, String firstTeamName, String secondTeamKey,
+                      String secondTeamName, Instant startedAt, long creationOrder) {
+            this.firstTeamKey = firstTeamKey;
+            this.firstTeamName = firstTeamName;
+            this.secondTeamKey = secondTeamKey;
+            this.secondTeamName = secondTeamName;
+            this.startedAt = startedAt;
             this.creationOrder = creationOrder;
         }
 
-        private boolean containsPair(String a, String b) {
-            return firstKey.equals(a) && secondKey.equals(b)
-                    || firstKey.equals(b) && secondKey.equals(a);
+        private boolean isPair(String oneTeamKey, String otherTeamKey) {
+            return firstTeamKey.equals(oneTeamKey) && secondTeamKey.equals(otherTeamKey)
+                    || firstTeamKey.equals(otherTeamKey) && secondTeamKey.equals(oneTeamKey);
+        }
+
+        private boolean includes(String teamKey) {
+            return firstTeamKey.equals(teamKey) || secondTeamKey.equals(teamKey);
+        }
+
+        private void updateScore(String firstRequestedTeamKey,
+                                 int firstRequestedTeamScore,
+                                 int secondRequestedTeamScore) {
+            if (firstTeamKey.equals(firstRequestedTeamKey)) {
+                firstScore = firstRequestedTeamScore;
+                secondScore = secondRequestedTeamScore;
+            } else {
+                firstScore = secondRequestedTeamScore;
+                secondScore = firstRequestedTeamScore;
+            }
+        }
+
+        private int scoreOf(String teamKey) {
+            return firstTeamKey.equals(teamKey) ? firstScore : secondScore;
+        }
+
+        private int opponentScoreOf(String teamKey) {
+            return firstTeamKey.equals(teamKey) ? secondScore : firstScore;
+        }
+
+        private void finish() {
+            status = Status.FINISHED;
+        }
+
+        private boolean isInProgress() {
+            return status == Status.IN_PROGRESS;
         }
 
         private long totalScore() {
@@ -161,7 +218,7 @@ public final class MatchManager {
         }
 
         private MatchSummary summary() {
-            return new MatchSummary(firstDisplay, secondDisplay, firstScore, secondScore, startTime);
+            return new MatchSummary(firstTeamName, secondTeamName, firstScore, secondScore, startedAt);
         }
     }
 }

@@ -1,5 +1,10 @@
 package com.rtf.scoreboard;
 
+import com.rtf.scoreboard.exception.InvalidScoreException;
+import com.rtf.scoreboard.exception.InvalidTeamNameException;
+import com.rtf.scoreboard.exception.MatchNotInProgressException;
+import com.rtf.scoreboard.exception.SameTeamMatchException;
+import com.rtf.scoreboard.exception.TeamAlreadyPlayingException;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.Clock;
@@ -98,11 +103,11 @@ class MatchManagerTest {
         manager.createNewMatch("b", "a");
         assertScore(manager, 0, 0);
         manager.finishMatch("B", "A");
-        TeamSummary a = manager.getSummaryOfTheTeam("a");
-        assertEquals(2, a.matchesPlayed());
-        assertEquals(1, a.matchesWon());
-        assertEquals(1, a.matchesDrawn());
-        assertEquals("A", a.teamName());
+        TeamSummary teamSummary = manager.getSummaryOfTheTeam("a");
+        assertEquals(2, teamSummary.matchesPlayed());
+        assertEquals(1, teamSummary.matchesWon());
+        assertEquals(1, teamSummary.matchesDrawn());
+        assertEquals("A", teamSummary.teamName());
     }
 
     @Test void sortsByTotalScoreThenNewestStartTime() {
@@ -158,10 +163,11 @@ class MatchManagerTest {
         assertEquals(second, match.secondTeamScore());
     }
 
-    private static void play(MatchManager manager, String a, String b, int x, int y) {
-        manager.createNewMatch(a, b);
-        manager.updateScore(a, b, x, y);
-        manager.finishMatch(a, b);
+    private static void play(MatchManager manager, String firstTeam, String secondTeam,
+                             int firstTeamScore, int secondTeamScore) {
+        manager.createNewMatch(firstTeam, secondTeam);
+        manager.updateScore(firstTeam, secondTeam, firstTeamScore, secondTeamScore);
+        manager.finishMatch(firstTeam, secondTeam);
     }
 
     private static final class MutableClock extends Clock {

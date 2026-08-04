@@ -2,49 +2,36 @@
 
 ## Short summary
 
-AI tools were used before implementation to refine the requirements, identify edge cases, define the intended public API, and prepare an implementation brief for GitHub Copilot.
+AI tools were used for requirements analysis, implementation, testing, review, and refactoring.
 
-ChatGPT was used as a requirements and design assistant. It did not implement or verify production code at the time this document was created. GitHub Copilot is intended to be used during implementation, based on the implementation brief included below. This document should be updated after implementation if Copilot generates, completes, refactors, or tests any code.
+ChatGPT was used to clarify open design questions, identify edge cases, and prepare a detailed implementation specification. That specification was then supplied to an OpenAI Codex coding agent in a single request. The agent inspected the repository, implemented the Java library and its unit tests, and ran the Maven test suite. Follow-up prompts were used to review the implementation and improve naming, exception design, and encapsulation.
 
-All domain decisions were reviewed and accepted by the author. In particular, the author chose the public operations, case-insensitive team identification, the absence of public match IDs, full-score updates, completed-match-only team statistics, and single-threaded operation.
+The assignment defined four core operations, summary ordering, and the requirement to add one additional operation. The remaining domain rules described below were design assumptions chosen by the author, not requirements imposed by the assignment. The author reviewed the generated solution and requested changes where the initial implementation did not match the preferred design.
 
-## AI tools used so far
+## AI tools used
 
 | Tool | How it was used | Result |
 | --- | --- | --- |
-| ChatGPT | Requirements clarification, API discussion, edge-case analysis, and preparation of a Copilot implementation prompt | The decisions and implementation artifact documented below |
-| GitHub Copilot | Not yet used at the time this document was created | A prompt has been prepared for the implementation phase |
+| ChatGPT | Requirements clarification, API discussion, edge-case analysis, and preparation of the implementation specification | Documented assumptions, design decisions, and the implementation artifact included below |
+| OpenAI Codex coding agent | Repository inspection, implementation, unit-test creation, local build verification, review, and refactoring | Production code, domain exceptions, JUnit tests, Maven test configuration, and subsequent clean-code changes |
 
-The exact ChatGPT model/version was not recorded in this document. No claim is made that AI-generated suggestions are correct merely because they were produced by an AI tool; the implementation and tests remain the author's responsibility.
+## Assignment requirements and author-defined assumptions
 
-## Context and decisions established with ChatGPT
+### Requirements supplied in the assignment
 
-The intended deliverable is a simple Java library for managing matches. It is not a console UI and should not print directly to standard output.
+The assignment required the library to:
 
-The following decisions were made during the conversation:
+1. start a new match;
+2. update a score;
+3. finish a match;
+4. return matches in progress ordered by descending total score and then by most recent start time;
+5. provide exactly one additional operation selected by the author and introduced in a distinct git commit.
 
-- Teams are identified in the public API by names represented as `String` values.
-- Team-name comparison is case-insensitive and ignores leading and trailing whitespace.
-- Match IDs are not exposed to callers.
-- A team cannot play against itself.
-- A team can participate in at most one in-progress match at a time.
-- `A-B` and `B-A` identify the same in-progress match.
-- Multiple completed matches between the same teams are allowed.
-- Every new match begins at `0:0`.
-- The library supplies and stores the immutable start time.
-- A score update supplies the complete new score rather than a score delta.
-- Score values are non-negative integers and may be raised or lowered.
-- Completed matches cannot be updated.
-- Completed matches are retained as history and kept separately from in-progress matches.
-- In-progress matches are summarized by descending total score and then by newest start time.
-- Team statistics include completed matches only.
-- The library is designed for single-threaded use.
-- Invalid operations are reported using domain-specific exceptions.
-- Read operations return immutable snapshots rather than mutable domain entities.
+The chosen additional operation is `getSummaryOfTheTeam`, which calculates completed-match statistics for a selected team.
 
 ## Prompt history
 
-The prompts below record the requirements discussion that preceded implementation. Minor typographical errors in the original Polish prompts have been retained where practical. Assistant responses are not reproduced verbatim; their resulting decisions are captured in the context section and implementation artifact.
+The prompts below are quoted verbatim. Spelling, grammar, and wording have not been corrected. Explanatory text outside the block quotes is contextual information and is not part of the original prompts.
 
 ### Prompt 1: initial task description
 
@@ -84,7 +71,7 @@ This led to explicit handling of reversed team order, invalid names, score valid
 
 > Świetnie. Podsumuj mi to tak, bym mogła teraz przejść z tym do implementacji kodu z GitHub Copilotem
 
-ChatGPT produced the implementation brief reproduced in the next section. At the time this document was created, that brief was an input artifact prepared for Copilot rather than evidence that the implementation had already been completed.
+ChatGPT produced the implementation brief reproduced in the next section. The brief was initially prepared for Copilot and was later supplied to the Codex coding agent as the primary implementation artifact. It guided both production behavior and unit-test coverage.
 
 ### Prompt 5: AI documentation
 
@@ -93,9 +80,48 @@ ChatGPT produced the implementation brief reproduced in the next section. At the
 > • Include your prompt history and other contextual information  
 > • Any artifact that guided the implementation
 
-## Artifact that guides the implementation
+### Prompt 6: implementation request
 
-The following specification was prepared with ChatGPT for use as the primary implementation prompt in GitHub Copilot.
+The author submitted the full implementation specification reproduced in the artifact section below and requested:
+
+> Zaimplementuj prostą jednowątkową bibliotekę w Javie do zarządzania meczami. Najpierw sprawdź istniejącą strukturę projektu, wersję Javy, system budowania i konwencje testowe. Dostosuj implementację do projektu i nie zmieniaj niepowiązanych plików.
+
+The Codex agent inspected the Maven project, implemented the library in `com.rtf.scoreboard`, added JUnit 5 configuration and tests, and ran the build.
+
+### Prompt 7: clean-code refactoring
+
+> dobra, pora na refaktor nieużywanych zmiennych, weź pogrupuj wyjątki, zmień nazwy zmiennych itd. wedle clean code'u
+
+This prompted a behavior-preserving refactor. Domain exceptions were grouped under `com.rtf.scoreboard.exception`; abbreviated variables were replaced with domain-specific names; collection names were clarified; and score/status mutations were encapsulated inside the private `Match` model.
+
+### Prompt 8: exception-constructor design
+
+> Co do wyjątków - mam wrażenie, że konstruktory można by uprościć - bo tekst jest stały, to czy jest sens, by przekazywać pełen string, a ine tylko zmienną część?
+
+Exception messages were centralized in the exception classes. Exceptions with fixed messages received no-argument constructors. Initially, `TeamAlreadyPlayingException` accepted only the team name as its variable component.
+
+### Prompt 9: update AI documentation
+
+> dobra, popatrz na plik AI.md - zaktualizuj i uzupełnij o to, co robiliśmy. Plik AI.md powinien zawierać: Short summary of how AI tools were used; Include your prompt history and other contextual information; Any artifact that guided the implementation
+
+This prompt resulted in an update preserving the original design record while adding the implementation, verification, and refactoring history.
+
+### Prompt 10: implementation review
+
+> Explain why this implementation satisfies the requirement and identify any case in which it may violate the documented assumptions.
+
+The Codex agent compared the current implementation against the documented requirements. It confirmed the main behavior and identified assumption boundaries concerning the meaning of a team's “first valid use,” exceptional failures between in-memory collection mutations, custom `Clock` implementations, and theoretical `long` overflow.
+
+### Prompt 11: documentation update
+
+> dobra, zaktualizuj AI.md o ten wpis nowy
+
+## Implementation artifact
+
+The following specification was prepared with ChatGPT for use as the primary implementation prompt in GitHub Copilot. It was later supplied without scope changes to the Codex coding agent.
+
+<details>
+<summary>Full implementation specification</summary>
 
 ### Goal
 
@@ -273,25 +299,44 @@ Tests should cover at least:
 23. A valid unknown team receives zero statistics.
 24. Returned summaries cannot be used to mutate library state.
 
-## Human review and responsibility
+</details>
 
-AI output was used as design assistance, not as an authority. The author remains responsible for:
+## Implementation and verification
 
-- deciding whether the proposed design fits the assignment,
-- reviewing every generated code change,
-- checking API compatibility with the repository,
-- running and interpreting the tests,
-- correcting defects or unsupported assumptions,
-- ensuring that the final submission is understood and can be explained without relying on AI output.
+### Result produced by the coding agent
 
-## Implementation log to complete later
+The agent implemented:
 
-Update this section after using GitHub Copilot:
+- `MatchManager`, containing the public operations, validation, active-match lookup, history, sorting, and team statistics;
+- immutable `MatchSummary` and `TeamSummary` records;
+- domain exceptions under `com.rtf.scoreboard.exception`;
+- `MatchManagerTest`, using JUnit 5;
+- the JUnit Jupiter dependency and Maven Surefire configuration in `pom.xml`.
 
-- Copilot features used: _not yet recorded_
-- Files or classes generated/completed by Copilot: _not yet recorded_
-- Important implementation prompts: _not yet recorded_
-- Suggestions rejected or substantially changed: _not yet recorded_
-- Tests generated or proposed by Copilot: _not yet recorded_
-- Manual verification performed: _not yet recorded_
-- Final build and test result: _not yet recorded_
+### Important implementation choices
+
+- Team identity uses `String.strip()` and `toLowerCase(Locale.ROOT)`.
+- Active matches are indexed by normalized team name, enforcing the one-active-match-per-team assumption and allowing exact-pair validation.
+- Finished matches are stored separately and are the sole input to team statistics.
+- Reversed score updates are mapped to the stored team order.
+- Match summaries are immutable snapshots sorted by total score, start time, and creation sequence.
+- `Clock` is constructor-injected for deterministic time tests.
+- Exception messages are defined inside the corresponding exception classes.
+
+### Author-requested changes after generation
+
+- Domain exceptions were moved from the root scoreboard package to a dedicated exception package.
+- Abbreviated variables and unclear collection names were replaced with domain-specific names.
+- Score and status mutations were encapsulated inside the private match model.
+- Exception constructors were simplified so callers provide only message-specific context, not complete fixed messages.
+
+### Verification performed
+
+The generated JUnit suite contains 14 test methods covering the 24 author-defined scenarios from the implementation artifact. The final Maven execution reported:
+
+```text
+Tests run: 14, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+The project is configured to build with Java 26. The recorded Maven build and test execution used JDK 26, matching the intended project version.

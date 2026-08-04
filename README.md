@@ -14,9 +14,9 @@ The required operations are:
 2. Update the score of a match.
 3. Finish a match.
 4. Get a summary of matches in progress, ordered by:
-    - total score in descending order;
-    - most recently started match first when total scores are equal.
-5. Add exactly one additional operation and explain why it was chosen.
+   - total score in descending order;
+   - most recently started match first when total scores are equal.
+5. Add exactly one additional operation, explain why it was chosen, and introduce it in a distinct git commit.
 
 ## Public operations
 
@@ -71,7 +71,7 @@ It was also chosen because it exercises both sides of the model:
 
 Only completed matches are included. A match in progress cannot yet be classified reliably as a win, loss, or draw, and including only some of its data would make the returned statistics internally inconsistent.
 
-The additional feature should be introduced in a distinct git commit, as required by the assignment.
+The assignment requires this additional feature to be introduced in a distinct git commit so that it is clearly separated from the core operations in the repository history.
 
 ## Assumptions
 
@@ -154,6 +154,8 @@ Total score is calculated using `long` arithmetic even though individual scores 
 
 This avoids integer overflow during comparison.
 
+If `m` is the number of matches currently in progress, producing the ordered summary has `O(m log m)` time complexity because the returned matches are sorted on demand. The solution assumes that the number of simultaneous matches remains relatively small.
+
 ### Team statistics
 
 - Statistics include completed matches only.
@@ -170,12 +172,17 @@ The following invariant is expected to hold:
 matchesPlayed = matchesWon + matchesLost + matchesDrawn
 ```
 
+Completed matches are stored in a list, and `getSummaryOfTheTeam` scans that list whenever statistics are requested. If `h` is the number of completed matches, the query therefore has `O(h)` time complexity. This is accepted because the solution assumes that completed-match history remains relatively small.
+
 ### Runtime model
 
 - The library is in-memory and does not provide persistence.
-- The intended usage is single-threaded.
-- Thread safety, synchronization, and concurrent collections are outside the current scope.
+- The scoreboard exists only for the lifetime of the library instance. Active matches and completed-match history are lost when the process stops.
+- Completed-match history is unbounded. There is no retention policy, archival, pagination, or maximum history size.
+- The intended usage is single-threaded, and all operations are expected to be invoked sequentially.
+- The library does not provide thread-safety guarantees. Concurrent calls may violate its invariants or expose inconsistent state.
 - The library uses a supplied `Clock` where appropriate so time-dependent behavior can be tested deterministically.
+- Match start times are stored as `Instant` values. The library records and orders absolute points in time but does not convert or format them for a caller's local time zone.
 - Empty collections are returned instead of `null`.
 - Read operations return immutable snapshots rather than mutable internal match objects.
 
@@ -216,6 +223,24 @@ Returning internal mutable match objects would let callers bypass validation and
 
 The library remains responsible for assigning match start times, but using `Clock` instead of calling the system clock directly makes ordering tests repeatable. A default instance can still use the real UTC clock.
 
+Start times are represented as `Instant`, which provides an unambiguous point on the timeline. Time-zone-specific conversion and formatting are presentation concerns and are left to the consuming application.
+
+### Why calculate team statistics on demand?
+
+Completed matches remain the source of truth for the additional team-summary operation. Calculating statistics by scanning the history avoids maintaining a second mutable aggregate that could become inconsistent with the underlying matches.
+
+The cost is that `getSummaryOfTheTeam` becomes slower as history grows. A production-scale alternative could maintain per-team aggregates for constant-time reads, but every completed match would then need to update both history and aggregates consistently.
+
+### Why use process-local, unbounded storage?
+
+In-memory collections keep the exercise focused on domain behavior and avoid adding database, serialization, recovery, and retention concerns. The solution assumes a relatively small scoreboard whose state is needed only for the lifetime of one library instance.
+
+This means that data is not durable, cannot be shared between application instances, and grows without an automatic retention limit.
+
+### Why support single-threaded use only?
+
+Sequential access keeps state transitions across active-match indexes and completed-match history straightforward. Supporting concurrent callers would require synchronization or a different state-management design to preserve the same invariants atomically.
+
 ### Why use domain-specific exceptions?
 
 Invalid operations have different causes, such as an invalid team name, a team already playing, a negative score, or a match that is not in progress. Explicit exceptions make failures visible and allow callers and tests to distinguish these cases without inspecting error-message text.
@@ -224,20 +249,23 @@ Invalid operations have different causes, such as an invalid team name, a team a
 
 | Decision | Benefit | Cost or limitation |
 | --- | --- | --- |
-| Names instead of public match IDs | Small, readable API | Renaming and name collisions are harder to model; the API would not support two simultaneous matches involving the same team |
+| Team names represented by `String` values instead of stable IDs or team entities | Small, readable API without additional domain objects | Renaming, aliases, team metadata, and two teams with the same normalized name cannot be represented cleanly |
 | Case-insensitive team identity | More forgiving for callers | Distinct teams whose names differ only by case cannot be represented |
 | One in-progress match per team | Removes match-selection ambiguity and reflects the chosen domain model | Prevents modelling parallel squads, competitions, or data errors without adding another identifier |
 | Unordered team pair | `A-B` and `B-A` cannot become duplicate active matches | The model has no home/away semantics |
 | Complete-score replacement | Idempotent updates and easy corrections | No event-level history of how the score changed |
 | Non-negative `int` scores | Simple API and ample range for normal sports results | Does not support fractional scores and has a fixed upper bound |
 | Separate active matches and completed history | Clear lifecycle and supports statistics | Requires maintaining multiple collections consistently |
-| Retaining all completed matches | Enables accurate team statistics | Memory usage grows for the lifetime of the service |
 | Completed-only team statistics | Produces stable and internally consistent outcomes | Current in-progress performance is not reflected |
 | Zero summary for an unknown team | Simple, null-free query behavior | A caller typo is not distinguished from a real team with no completed matches |
 | Immutable snapshots | Protects invariants and prevents accidental mutation | Creates additional objects when summaries are requested |
 | Injected `Clock` | Deterministic tests | Adds a small amount of constructor/API complexity |
+| `Instant` timestamps without time-zone presentation logic | Provides unambiguous ordering independent of local time zones | The consuming application must convert and format timestamps for users |
 | Domain-specific exceptions | Precise and testable failure contract | Introduces more exception classes |
-| In-memory, single-threaded implementation | Keeps the exercise focused and easy to reason about | No persistence, process sharing, or thread-safety guarantees |
+| Process-local in-memory state | Avoids persistence and serialization complexity | All active matches and history are lost when the process stops; state cannot be shared between instances |
+| Unbounded completed-match history | Keeps retention logic out of the domain implementation and preserves source data for statistics | Memory usage grows with every completed match; there is no archival, pagination, or retention policy |
+| Team statistics calculated by scanning history | Avoids maintaining a second mutable aggregate that could diverge from history | `getSummaryOfTheTeam` takes `O(h)` time and becomes slower as completed history grows |
+| Single-threaded implementation | Avoids synchronization and keeps multi-collection updates straightforward | Concurrent calls are unsupported and may violate invariants or expose inconsistent state |
 
 ## Error handling
 
@@ -257,10 +285,12 @@ The following features are intentionally not included:
 
 - persistence or database integration;
 - thread-safe access;
+- retention, archival, or pagination of completed-match history;
 - public match IDs;
 - competitions, seasons, venues, or home/away semantics;
 - score-event history;
 - match end timestamps;
+- time-zone-specific conversion or display formatting;
 - editing completed matches;
 - deleting matches or history;
 - a separate operation for querying full match history;

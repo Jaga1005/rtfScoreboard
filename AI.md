@@ -116,6 +116,12 @@ The Codex agent compared the current implementation against the documented requi
 
 > dobra, zaktualizuj AI.md o ten wpis nowy
 
+### Prompt 12: separate commit and reconcile history
+
+> czy mogę pomanipulować trochę committami? żeby ta ostatnia metoda - getSummaryOfTheTeam była w osobnym commicie?
+
+The author asked the coding agent to separate `getSummaryOfTheTeam`, `TeamSummary`, and the corresponding tests from the original implementation commit. The agent rewrote the local history, verified the unchanged final source tree and test suite, and updated `origin/main` with the resulting linear history.
+
 ## Implementation artifact
 
 The following specification was prepared with ChatGPT for use as the primary implementation prompt in GitHub Copilot. It was later supplied without scope changes to the Codex coding agent.

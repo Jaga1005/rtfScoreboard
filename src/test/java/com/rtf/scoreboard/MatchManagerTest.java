@@ -98,6 +98,11 @@ class MatchManagerTest {
         manager.createNewMatch("b", "a");
         assertScore(manager, 0, 0);
         manager.finishMatch("B", "A");
+        TeamSummary a = manager.getSummaryOfTheTeam("a");
+        assertEquals(2, a.matchesPlayed());
+        assertEquals(1, a.matchesWon());
+        assertEquals(1, a.matchesDrawn());
+        assertEquals("A", a.teamName());
     }
 
     @Test void sortsByTotalScoreThenNewestStartTime() {
@@ -122,6 +127,27 @@ class MatchManagerTest {
                 .map(MatchSummary::firstTeam).toList());
     }
 
+    @Test void teamStatisticsIncludeOnlyFinishedMatchesAndBothTeamPositions() {
+        MatchManager manager = new MatchManager();
+        play(manager, "A", "B", 3, 1);
+        play(manager, "C", "A", 2, 0);
+        play(manager, "A", "D", 2, 2);
+        manager.createNewMatch("A", "E");
+        manager.updateScore("A", "E", 100, 0);
+        TeamSummary result = manager.getSummaryOfTheTeam(" a ");
+        assertEquals(new TeamSummary("A", 3, 1, 1, 1, 5), result);
+        assertEquals(result.matchesPlayed(), result.matchesWon() + result.matchesLost() + result.matchesDrawn());
+    }
+
+    @Test void unknownAndOnlyActiveTeamsHaveZeroStatistics() {
+        MatchManager manager = new MatchManager();
+        assertEquals(new TeamSummary("Unknown", 0, 0, 0, 0, 0),
+                manager.getSummaryOfTheTeam(" Unknown "));
+        manager.createNewMatch("First Seen", "B");
+        assertEquals(new TeamSummary("First Seen", 0, 0, 0, 0, 0),
+                manager.getSummaryOfTheTeam("FIRST SEEN"));
+    }
+
     private static MatchManager managerAt(Instant instant) {
         return new MatchManager(Clock.fixed(instant, ZoneOffset.UTC));
     }
@@ -130,6 +156,12 @@ class MatchManagerTest {
         MatchSummary match = manager.getSummaryOfInProgressMatches().getFirst();
         assertEquals(first, match.firstTeamScore());
         assertEquals(second, match.secondTeamScore());
+    }
+
+    private static void play(MatchManager manager, String a, String b, int x, int y) {
+        manager.createNewMatch(a, b);
+        manager.updateScore(a, b, x, y);
+        manager.finishMatch(a, b);
     }
 
     private static final class MutableClock extends Clock {

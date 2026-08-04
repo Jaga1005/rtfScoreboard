@@ -94,6 +94,29 @@ public final class MatchManager {
                 .toList();
     }
 
+    public TeamSummary getSummaryOfTheTeam(String team) {
+        TeamName requested = parseTeam(team);
+        String displayName = displayNames.getOrDefault(requested.key, requested.trimmed);
+        long played = 0;
+        long won = 0;
+        long lost = 0;
+        long drawn = 0;
+        long goals = 0;
+        for (Match match : history) {
+            boolean first = match.firstKey.equals(requested.key);
+            boolean second = match.secondKey.equals(requested.key);
+            if (!first && !second) continue;
+            played++;
+            int own = first ? match.firstScore : match.secondScore;
+            int opponent = first ? match.secondScore : match.firstScore;
+            goals += own;
+            if (own > opponent) won++;
+            else if (own < opponent) lost++;
+            else drawn++;
+        }
+        return new TeamSummary(displayName, played, won, lost, drawn, goals);
+    }
+
     private Match findActivePair(String firstKey, String secondKey) {
         Match match = activeByTeam.get(firstKey);
         if (match == null || !match.containsPair(firstKey, secondKey)) {

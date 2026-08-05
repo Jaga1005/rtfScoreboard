@@ -2,9 +2,11 @@
 
 ## Short summary
 
-AI tools were used for requirements analysis, implementation, testing, review, and refactoring.
+AI tools were used for requirements analysis, implementation, testing, review, and refactoring to create a clean, maintainable Java library for match management.
 
 ChatGPT was used to clarify open design questions, identify edge cases, and prepare a detailed implementation specification. That specification was then supplied to an OpenAI Codex coding agent in a single request. The agent inspected the repository, implemented the Java library and its unit tests, and ran the Maven test suite. Follow-up prompts were used to review the implementation and improve naming, exception design, and encapsulation.
+
+After the initial implementation, a code review was performed to identify violations of Clean Code principles. Two refactorings were then applied: extracting a comparator chain into a dedicated private method for improved readability, and converting an imperative loop to a declarative stream-based approach using a helper class for statistics accumulation. These changes improved code maintainability while preserving all existing behavior and test coverage.
 
 The assignment defined four core operations, summary ordering, and the requirement to add one additional operation. The remaining domain rules described below were design assumptions chosen by the author, not requirements imposed by the assignment. The author reviewed the generated solution and requested changes where the initial implementation did not match the preferred design.
 
@@ -14,6 +16,8 @@ The assignment defined four core operations, summary ordering, and the requireme
 | --- | --- | --- |
 | ChatGPT | Requirements clarification, API discussion, edge-case analysis, and preparation of the implementation specification | Documented assumptions, design decisions, and the implementation artifact included below |
 | OpenAI Codex coding agent | Repository inspection, implementation, unit-test creation, local build verification, review, and refactoring | Production code, domain exceptions, JUnit tests, Maven test configuration, and subsequent clean-code changes |
+| GitHub Copilot CLI code-review agent | Clean Code analysis across the full `src/main` codebase; identification of naming, structure, pattern, and stream-usage violations | Detailed report identifying redundant boilerplate in record getters and imperative loop patterns suitable for stream conversion |
+| GitHub Copilot CLI refactoring | Applied two high-priority Clean Code improvements: extracted a long comparator chain into a dedicated method and converted an imperative loop to a declarative stream-based approach | Improved code readability, maintainability, and adherence to functional programming patterns in Java; all existing tests remain passing |
 
 ## Assignment requirements and author-defined assumptions
 
@@ -121,6 +125,20 @@ The Codex agent compared the current implementation against the documented requi
 > czy mogę pomanipulować trochę committami? żeby ta ostatnia metoda - getSummaryOfTheTeam była w osobnym commicie?
 
 The author asked the coding agent to separate `getSummaryOfTheTeam`, `TeamSummary`, and the corresponding tests from the original implementation commit. The agent rewrote the local history, verified the unchanged final source tree and test suite, and updated `origin/main` with the resulting linear history.
+
+### Prompt 13: code review and clean-code refactoring
+
+> weź zrób code review kodu, zastosuj zasady clean code
+
+The Copilot CLI's code-review agent analyzed the entire `src/main` codebase against Clean Code principles including naming conventions, function length, comments necessity, DRY principle, error handling, single responsibility principle, magic numbers/strings, code structure, and performance.
+
+The review identified two HIGH priority issues:
+1. Redundant getter methods in `MatchSummary` and `TeamSummary` records (Java 14+ records generate getters automatically)
+2. An imperative loop in `getSummaryOfTheTeam` that could benefit from stream-based refactoring
+
+### Prompt 14: apply stream and comparator refactoring
+
+> wykonaj poprawkę 2 i 3 - comparator i zmianę na stream
 
 ## Implementation artifact
 

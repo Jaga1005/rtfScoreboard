@@ -15,10 +15,4 @@ public record MatchSummary(
         Objects.requireNonNull(secondTeam);
         Objects.requireNonNull(startTime);
     }
-
-    public String getFirstTeam() { return firstTeam; }
-    public String getSecondTeam() { return secondTeam; }
-    public int getFirstTeamScore() { return firstTeamScore; }
-    public int getSecondTeamScore() { return secondTeamScore; }
-    public Instant getStartTime() { return startTime; }
 }

@@ -79,11 +79,7 @@ public final class MatchManager {
         return inProgressMatchesByTeamKey.values().stream()
                 .distinct()
                 .filter(Match::isInProgress)
-                .sorted(Comparator
-                        .comparingLong(Match::totalScore).reversed()
-                        .thenComparing((Match match) -> match.startedAt, Comparator.reverseOrder())
-                        .thenComparing(Comparator.comparingLong(
-                                (Match match) -> match.creationOrder).reversed()))
+                .sorted(createMatchComparator())
                 .map(Match::summary)
                 .toList();
     }
@@ -91,30 +87,15 @@ public final class MatchManager {
     public TeamSummary getSummaryOfTheTeam(String team) {
         TeamName requestedTeam = parseTeamName(team);
         String teamName = canonicalNameOf(requestedTeam);
-        long matchesPlayed = 0;
-        long matchesWon = 0;
-        long matchesLost = 0;
-        long matchesDrawn = 0;
-        long goalsScored = 0;
 
-        for (Match match : finishedMatches) {
-            if (!match.includes(requestedTeam.key)) {
-                continue;
-            }
-            matchesPlayed++;
-            int teamScore = match.scoreOf(requestedTeam.key);
-            int opponentScore = match.opponentScoreOf(requestedTeam.key);
-            goalsScored += teamScore;
-            if (teamScore > opponentScore) {
-                matchesWon++;
-            } else if (teamScore < opponentScore) {
-                matchesLost++;
-            } else {
-                matchesDrawn++;
-            }
-        }
-        return new TeamSummary(teamName, matchesPlayed, matchesWon, matchesLost,
-                matchesDrawn, goalsScored);
+        TeamStats stats = finishedMatches.stream()
+                .filter(match -> match.includes(requestedTeam.key))
+                .reduce(new TeamStats(),
+                        (acc, match) -> acc.addMatch(match, requestedTeam.key),
+                        TeamStats::combine);
+
+        return new TeamSummary(teamName, stats.matchesPlayed, stats.matchesWon,
+                stats.matchesLost, stats.matchesDrawn, stats.goalsScored);
     }
 
     private void ensureTeamIsAvailable(TeamName teamName) {
@@ -151,6 +132,63 @@ public final class MatchManager {
     }
 
     private enum Status {IN_PROGRESS, FINISHED}
+
+    private static Comparator<Match> createMatchComparator() {
+        return Comparator
+                .comparingLong(Match::totalScore).reversed()
+                .thenComparing((Match match) -> match.startedAt, Comparator.reverseOrder())
+                .thenComparingLong((Match match) -> -match.creationOrder);
+    }
+
+    private static final class TeamStats {
+        long matchesPlayed;
+        long matchesWon;
+        long matchesLost;
+        long matchesDrawn;
+        long goalsScored;
+
+        TeamStats() {
+            this.matchesPlayed = 0;
+            this.matchesWon = 0;
+            this.matchesLost = 0;
+            this.matchesDrawn = 0;
+            this.goalsScored = 0;
+        }
+
+        private TeamStats(long matchesPlayed, long matchesWon, long matchesLost,
+                          long matchesDrawn, long goalsScored) {
+            this.matchesPlayed = matchesPlayed;
+            this.matchesWon = matchesWon;
+            this.matchesLost = matchesLost;
+            this.matchesDrawn = matchesDrawn;
+            this.goalsScored = goalsScored;
+        }
+
+        TeamStats addMatch(Match match, String teamKey) {
+            matchesPlayed++;
+            int teamScore = match.scoreOf(teamKey);
+            int opponentScore = match.opponentScoreOf(teamKey);
+            goalsScored += teamScore;
+
+            if (teamScore > opponentScore) {
+                matchesWon++;
+            } else if (teamScore < opponentScore) {
+                matchesLost++;
+            } else {
+                matchesDrawn++;
+            }
+            return this;
+        }
+
+        static TeamStats combine(TeamStats a, TeamStats b) {
+            return new TeamStats(
+                    a.matchesPlayed + b.matchesPlayed,
+                    a.matchesWon + b.matchesWon,
+                    a.matchesLost + b.matchesLost,
+                    a.matchesDrawn + b.matchesDrawn,
+                    a.goalsScored + b.goalsScored);
+        }
+    }
 
     private record TeamName(String key, String displayName) {
     }
